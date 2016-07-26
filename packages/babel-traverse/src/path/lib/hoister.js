@@ -61,6 +61,29 @@ export default class PathHoister {
   }
 
   getAttachmentPath() {
+    let path = this._getAttachmentPath();
+    if (!path) return;
+
+    // avoid hoisting to a scope that contains bindings that are executed after our attachment path
+    if (path.scope.path.isProgram() || path.scope.path.isFunction()) {
+      for (let name in this.bindings) {
+        // check binding is a direct child of this paths scope
+        if (!path.scope.hasOwnBinding(name)) continue;
+
+        let binding = this.bindings[name];
+
+        // allow parameter references
+        if (binding.kind === "param") continue;
+
+        // if this binding appears after our attachment point then don't hoist it
+        if (binding.path.getStatementParent().key > path.key) return;
+      }
+    }
+
+    return path;
+  }
+
+  _getAttachmentPath() {
     let scopes = this.scopes;
 
     let scope = scopes.pop();
@@ -112,8 +135,8 @@ export default class PathHoister {
     // don't bother hoisting to the same function as this will cause multiple branches to be evaluated more than once leading to a bad optimisation
     if (attachTo.getFunctionParent() === this.path.getFunctionParent()) return;
 
+    // generate declaration and insert it to our point
     let uid = attachTo.scope.generateUidIdentifier("ref");
-
     attachTo.insertBefore([
       t.variableDeclaration("var", [
         t.variableDeclarator(uid, this.path.node)
@@ -121,7 +144,6 @@ export default class PathHoister {
     ]);
 
     let parent = this.path.parentPath;
-
     if (parent.isJSXElement() && this.path.container === parent.node.children) {
       // turning the `span` in `<div><span /></div>` to an expression so we need to wrap it with
       // an expression container
